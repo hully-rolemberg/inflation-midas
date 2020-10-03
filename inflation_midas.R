@@ -465,8 +465,9 @@ aux_eqm_ar1_rmse <- c()
 aux_eqm_ar1r_rmse <- c()
 aux_eqm_np_rmse <- c()
 
-resids_eqm_ar1 <- c()
-resids_eqm_ar1r <- c()
+adf_resids_ar1 <- c()
+adf_resids_ar1r <- c()
+adf_resids_np <- c()
 
 options(warn = -1)
 
@@ -525,9 +526,8 @@ for (h in 0:(n_test - step)) {
     aux_eqm_ar1_f <- forecast(eqm_ar1, newdata = data_test)$mean[step]
     eqm_ar1_f <- rbind(eqm_ar1_f, aux_eqm_ar1_f)
     
-    # aux_eqm_ar1_rmse <-rbind(aux_eqm_ar1_rmse,
-    #                          rmse(inflation_cpi_full_d[((( n_max- n_test) + step - 1) * 28 + 1):((TT + step - 1) * 28 + i)], eqm_ar1_f))
-    # 
+    aux_eqm_ar1_rmse <- rbind(aux_eqm_ar1_rmse, rmse(inflation_cpi_full_d[((( n_max- n_test) + step - 1) * 28 + 1):((TT + step - 1) * 28 + i)], eqm_ar1_f))
+    adf_resids_ar1 <- rbind(adf_resids_ar1, adf.test(eqm_ar1$residuals)$p.value)
     
     #-------- MIDAS-AR(1)-R --------
     
@@ -543,9 +543,8 @@ for (h in 0:(n_test - step)) {
     aux_eqm_ar1r_f <- forecast(eqm_ar1r, newdata = data_test)$mean[step]
     eqm_ar1r_f <- rbind(eqm_ar1r_f, aux_eqm_ar1r_f)
     
-    # aux_eqm_ar1r_rmse <- rbind(aux_eqm_ar1r_rmse,
-    #                            rmse(inflation_cpi_full_d[((n_max- n_test) * 28 + 1):(TT * 28 + i)], eqm_ar1r_f))
-    # 
+    aux_eqm_ar1r_rmse <- rbind(aux_eqm_ar1r_rmse, rmse(inflation_cpi_full_d[((n_max- n_test) * 28 + 1):(TT * 28 + i)], eqm_ar1r_f))
+    adf_resids_ar1r <- rbind(adf_resids_ar1r, adf.test(eqm_ar1r$residuals)$p.value)
     
     
     #-------- MIDAS-DL non-parametric--------
@@ -558,8 +557,9 @@ for (h in 0:(n_test - step)) {
     aux_eqm_np_f <- forecast(eqm_np, newdata = data_test)$mean[step]
     eqm_np_f <- rbind(eqm_np_f, aux_eqm_np_f)
     
-    # aux_eqm_np_rmse <- rbind(aux_eqm_np_rmse, rmse(inflation_cpi_full_d[(( n_max- n_test) * 28 + 1):(TT * 28 + i)], eqm_np_f))
-    # 
+    aux_eqm_np_rmse <- rbind(aux_eqm_np_rmse, rmse(inflation_cpi_full_d[(( n_max- n_test) * 28 + 1):(TT * 28 + i)], eqm_np_f))
+    adf_resids_np <- rbind(adf_resids_np, adf.test(eqm_np$residuals)$p.value)
+
   }
   
 
