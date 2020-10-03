@@ -645,30 +645,29 @@ eqm_np_f <- xts(eqm_np_f, order.by = date_d_test)
 #------- COMPARING MODELS --------
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+# MODEL CONFIDENCE SET
 MCSprocedure(cbind(loss_arima, loss_var_1, loss_eqb_1, loss_eqm_ar1, loss_eqm_ar1r, loss_eqm_np))
+
+# DIEBOLD E MARIANO
+error_eqb_1 <- eqb_1_f_avg - inflation_cpi_test
+error_var_1 <- var_1_f_avg - inflation_cpi_test
+error_eqm_ar1 <- eqm_ar1_f_avg - inflation_cpi_test
+error_eqm_ar1r <- eqm_ar1r_f_avg - inflation_cpi_test
+
+dm.test(error_var_1, error_eqm_ar1r)
 
 
 # # intra period forecasts
-# color = c("violetred2", "black")
-# plot.zoo(cbind(eqm_ar1_f, inflation_cpi_full_d[date_d_test]),
-#          plot.type = "single",
-#          col = color, lwd = c(1,1,1),
-#          ylab = "Annual Inflation (%)", xlab = "Period")
-# legend("topleft", inset=c(0,0), y.intersp = 1,
-#        legend = c("MIDAS-ADL", "Observed"),
-#        lty = 1, bty = "n", col = color, cex = 0.8)
-# title("intra-month forecasts")
-
-
-color = c("orange", "chartreuse3", "black")
-plot.zoo(cbind(eqb_1_f_avg, eqm_ar1_f_avg, inflation_cpi_full[date_m_test]),
+color = c("orange", "blue", "violetred2", "green", "black")
+plot.zoo(cbind(eqm_u_f, eqm_ar1_f, eqm_ar1r_f, eqm_np_f,
+               inflation_cpi_full_d[date_d_test]),
          plot.type = "single",
          col = color, lwd = c(1,1,1),
          ylab = "Annual Inflation (%)", xlab = "Period")
 legend("topleft", inset=c(0,0), y.intersp = 1,
-       legend = c("Bridge", "MIDAS-ADLr", "Observed"),
+       legend = c("MIDAS", "MIDAS-AR(1)", "MIDAS-AR(1)R", "MIDAS-NP", "Observed"),
        lty = 1, bty = "n", col = color, cex = 0.8)
-title("10 Observations")
+title("intra-month forecasts")
 
 
 
@@ -676,20 +675,4 @@ aux_eqm_ar1_rmse <- xts(aux_eqm_ar1_rmse, order.by = date_d_test)
 aux_var_1_rmse <- xts(rep(accuracy_var_1[1],(n_test-step+1)*28), order.by = date_d_test)
 plot.zoo(cbind(aux_var_1_rmse, aux_eqm_ar1_rmse), main=paste(step,"step ahead", sep = "-"), plot.type = "single",
          col =c("dodgerblue", "violetred2"), ylab = "", xlab = "", cex.lab=2,  cex.axis=2)
-
-
-# DIEBOLD E MARIANO
-
-# error_eqb_1 <- eqb_1_f_avg - inflation_cpi_full[date_m_test]
-# error_var_1 <- var_1_f_avg - inflation_cpi_full[date_m_test]
-# error_eqm_ar1 <- eqm_ar1_f_avg - inflation_cpi_full[date_m_test]
-# error_eqm_ar1r <- eqm_ar1r_f_avg - inflation_cpi_full[date_m_test]
-# 
-# dm.test(error_var_1, error_eqm_ar1r)
-
-# par(mfrow=c(1,1))
-#         legend("bottom", inset=c(0,0), y.intersp = 1, 
-#                legend = c("VAR(1)", "MIDAS-ADL"),  
-#                lty = 1, bty = "n", col = c("dodgerblue", "violetred2"), cex = 0.7, ncol = 2)
-
 
