@@ -106,7 +106,6 @@ date_m <- seq(min+1, max-1, by = "month")
 
 inflation_cpi_full <- inflation_cpi[sample_period]
 inflation_ps_full <- inflation_ps[sample_period]
-inflation_ps_agg_full <- matrix(inflation_ps_full, nrow=28) %>% colMeans(na.rm=TRUE) %>% cbind %>% xts(order.by = date_m)
 market_m_annual_full <- market_m_annual[sample_period]
 
 
@@ -121,6 +120,8 @@ adjust_to_28 <- function(series){
 }
 
 inflation_ps_full <- adjust_to_28(inflation_ps_full)
+inflation_ps_agg_full <- matrix(inflation_ps_full, nrow=28) %>% colMeans(na.rm=TRUE) %>% cbind %>% xts(order.by = date_m)
+
 date_d <- time(inflation_ps_full) %>% as.Date
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -166,15 +167,15 @@ n_max <- nrow(inflation_cpi_full)
 
 n_test <- 20
 n_train <- n_max - n_test
-inflation_cpi_test <- inflation_cpi_full[(n_max - n_test + step):n_max]
 
 # removing the last 10 observations 
 # inflation_cpi_full <- inflation_cpi_full[1:72]
 # inflation_ps_full <- inflation_ps_full[1:2016]
 # market_m_annual_full <- market_m_annual_full[1:72]
 
-step <-  3
+step <- 3
 l <- 6
+inflation_cpi_test <- inflation_cpi_full[(n_max - n_test + step):n_max]
 
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -194,6 +195,8 @@ data_train <- list(y = as.numeric(inflation_cpi_full[date_m_train]),
 
 
 
+
+
 #-------------- ARIMA ---
 arima <- Arima(data_train$y, c(1, 1, 0), include.constant = TRUE)
 summary(arima)
@@ -201,7 +204,7 @@ aux_arima_f <- fitted(arima)
 
 checkresiduals(arima)
 adf.test(residuals(arima))
-accuracy_arima_in <- rmse(inflation_cpi_full[1:62], aux_arima_f)
+accuracy_arima_in <- rmse(ts(inflation_cpi_full[1:62]), aux_arima_f)
 
 #-------------- VAR 1 ---
 
@@ -213,23 +216,32 @@ colnames(aux) <- c("y", "x", "z", "trend")
 VARselect(aux)
 
 
-# aux_vec <- ts(cbind(na.omit(data_train$y), na.omit(data_train$x_agg)))
-# vec <-ca.jo(aux_vec, spec = "transitory")
-# summary(vec)
+aux_vec <- ts(cbind(na.omit(data_train$y), na.omit(data_train$x_agg)))
+vec <- ca.jo(aux_vec, spec = "transitory")
+summary(vec)
 
 var_1 <- VAR(aux, 1)
 summary(var_1$varresult$y)
 aux_var_f <- fitted(var_1)[,1]
 
+par(mfrow=c(1,1))
 plot(residuals(var_1)[,1], type = "l")
 par(mfrow=c(1,2))
 acf(residuals(var_1)[,1]); pacf(residuals(var_1)[,1])
 par(mfrow=c(1,1))
 adf.test(residuals(var_1)[,1])
 
-accuracy_var_1_in <- rmse(inflation_cpi_full[2:n_train], aux_var_f)
+accuracy_var_1_in <- rmse(ts(inflation_cpi_full[2:n_train]), aux_var_f)
 
 #-------- BRIDGE EQUATION ---
+
+# testing exogeneity
+eq_exo <- lm(y ~ x_agg, data_train)
+durbinWatsonTest(eq_exo)
+
+# testing granger causality (H0: no Granger causality)
+grangertest(y ~ x_agg, order = 1,  data = data_train)
+grangertest(x_agg ~ y, order = 1,  data = data_train)
 
 eqb_1 <- lm(y ~ -1 + mls(y, 1, 1) + 
               mls(z, 1:2, 1) + 
@@ -243,10 +255,6 @@ checkresiduals(eqb_1)
 adf.test(residuals(eqb_1))
 accuracy_eqb_1_in <- rmse(inflation_cpi_full[4:n_train], aux_eqb_1_f)
 
-
-# stargazer(eqb_1, eqb_1, eqb_1)
-# eq_exo <- lm(y ~ x_agg, data_train)
-# durbinWatsonTest(eq_exo)
 
 #-------- MIDAS-DL ---
 
@@ -273,7 +281,7 @@ eqm_ar1 <- midas_r(y ~ trend +
 aux_eqm_ar1_f <- fitted(eqm_ar1)
 
 checkresiduals(eqm_ar1)
-adf.test(residuals(eqm_ar1)) # staionary 10%
+adf.test(residuals(eqm_ar1))
 accuracy_eqm_ar1_in <- rmse(inflation_cpi_full[2:n_train], aux_eqm_ar1_f)
 
 
@@ -289,7 +297,7 @@ eqm_ar1r <- midas_r(y ~ trend +
 aux_eqm_ar1r_f <- fitted(eqm_ar1r)
 
 checkresiduals(eqm_ar1r)
-adf.test(residuals(eqm_ar1r)) # staionary 5%
+adf.test(residuals(eqm_ar1r)) 
 accuracy_eqm_ar1r_in <- cbind(rmse(inflation_cpi_full[2:n_train], aux_eqm_ar1r_f))
 
 
@@ -302,7 +310,7 @@ eqm_np <- midas_r_np(y ~ trend +
 aux_eqm_np_f <- fitted(eqm_np)
 
 checkresiduals(eqm_np)
-adf.test(residuals(eqm_np)) # non-stationary
+adf.test(residuals(eqm_np)) 
 accuracy_eqm_np_in <- cbind(rmse(inflation_cpi_full[1:n_train], aux_eqm_np_f))
 
 
@@ -330,6 +338,8 @@ accuracy_in
 arima_f <- c()
 var_1_f <- c()
 eqb_1_f <- c()
+
+aux_eqm_var_1_rmse <- c()
 
 options(warn = -1)
 
@@ -387,7 +397,6 @@ for (h in 0:(n_test - step)) {
     aux_var_f <- predict(var_1, n.ahead = step)$fcst$y[step, 1]
     var_1_f <- rbind(var_1_f, aux_var_f)
     
-    
     #-------- BRIDGE EQUATION --------
     eqb_1 <- midas_r(y ~ -1 + 
                        mls(y, step, 1) +
@@ -403,6 +412,7 @@ for (h in 0:(n_test - step)) {
   }
 }
 
+assign(paste("aux_var_1_rmse", step, sep = "_"),xts(rep(accuracy_var_1[1],(n_test-step+1)*28), order.by = date_d_test))
 
 options(warn = 1)
 
@@ -451,10 +461,6 @@ assign(paste("accuracy_naive_point", l, sep = "_"),
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #------ FORECASTING MIDAS --------
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-inflation_cpi_full_d <- xts(ps_df$date, order.by = ps_df$date) %>% merge(inflation_cpi_full, all = TRUE) %>% na_locf
-inflation_cpi_full_d <- xts(time(inflation_ps_full), order.by = time(inflation_ps_full)) %>% merge(inflation_cpi_full_d, all = FALSE)
-inflation_cpi_full_d <-  inflation_cpi_full_d$inflation_cpi_full
-
 eqm_u_f <- c()
 eqm_ar1_f <- c()
 eqm_ar1r_f <- c()
@@ -467,7 +473,6 @@ aux_eqm_np_rmse <- c()
 
 adf_resids_ar1 <- c()
 adf_resids_ar1r <- c()
-adf_resids_np <- c()
 
 options(warn = -1)
 
@@ -485,14 +490,14 @@ for (h in 0:(n_test - step)) {
     
     aux_1 <- Arima(inflation_ps_full[1:(TT * 28 + i)], order = c(1, 1, 0), include.constant = TRUE)
     
-    if (28 - i + 28 * (step - 1) != 0) { 
-      aux_2 <- xts(forecast(aux_1, h = (28 - i + 28 * (step - 1)))$mean,
-                   order.by = date_d[(TT * 28 + i + 1):((TT +1) * 28 + 28 * (step - 1))])
+    if (28 - i + 28 * (step-1) != 0) { 
+      aux_2 <- xts(forecast(aux_1, h = (28-i+28*(step-1)))$mean,
+                   order.by = date_d[(TT*28+i+1):((TT+1)*28+28*(step-1))])
     } else {
       aux_2 <- c()
     }
     
-    aux_3 <- rbind(inflation_ps_full[(TT * 28 + 1):(TT * 28 + i)], aux_2)
+    aux_3 <- rbind(inflation_ps_full[(TT*28+1):(TT*28+i)], aux_2)
     
     data_test <- list(
       y = as.numeric(rep(NA, step)),
@@ -519,6 +524,7 @@ for (h in 0:(n_test - step)) {
     
     eqm_ar1 <- midas_r(y ~ trend +
                          mls(y, step, 1) +
+                         mls(z, step, 1) +
                          mls(x, 0:l, 28),
                        data = data_train,
                        start = NULL)
@@ -526,8 +532,10 @@ for (h in 0:(n_test - step)) {
     aux_eqm_ar1_f <- forecast(eqm_ar1, newdata = data_test)$mean[step]
     eqm_ar1_f <- rbind(eqm_ar1_f, aux_eqm_ar1_f)
     
-    aux_eqm_ar1_rmse <- rbind(aux_eqm_ar1_rmse, rmse(inflation_cpi_full_d[((( n_max- n_test) + step - 1) * 28 + 1):((TT + step - 1) * 28 + i)], eqm_ar1_f))
+    aux_eqm_ar1_rmse <- rbind(aux_eqm_ar1_rmse, rmse(inflation_cpi_full_d[(((n_max-n_test)+step-1)*28+1):((TT+step-1)*28+i)], eqm_ar1_f))
+    assign(paste("aux_eqm_ar1_rmse", step, sep = "_"), aux_eqm_ar1_rmse)
     adf_resids_ar1 <- rbind(adf_resids_ar1, adf.test(eqm_ar1$residuals)$p.value)
+
     
     #-------- MIDAS-AR(1)-R --------
     
@@ -543,7 +551,8 @@ for (h in 0:(n_test - step)) {
     aux_eqm_ar1r_f <- forecast(eqm_ar1r, newdata = data_test)$mean[step]
     eqm_ar1r_f <- rbind(eqm_ar1r_f, aux_eqm_ar1r_f)
     
-    aux_eqm_ar1r_rmse <- rbind(aux_eqm_ar1r_rmse, rmse(inflation_cpi_full_d[((n_max- n_test) * 28 + 1):(TT * 28 + i)], eqm_ar1r_f))
+    aux_eqm_ar1r_rmse <- rbind(aux_eqm_ar1r_rmse, rmse(inflation_cpi_full_d[(((n_max-n_test)+step-1)*28+1):((TT+step-1)*28+i)], eqm_ar1_f))
+    assign(paste("aux_eqm_ar1r_rmse", step, sep = "_"), aux_eqm_ar1r_rmse)
     adf_resids_ar1r <- rbind(adf_resids_ar1r, adf.test(eqm_ar1r$residuals)$p.value)
     
     
@@ -558,7 +567,6 @@ for (h in 0:(n_test - step)) {
     eqm_np_f <- rbind(eqm_np_f, aux_eqm_np_f)
     
     aux_eqm_np_rmse <- rbind(aux_eqm_np_rmse, rmse(inflation_cpi_full_d[(( n_max- n_test) * 28 + 1):(TT * 28 + i)], eqm_np_f))
-    adf_resids_np <- rbind(adf_resids_np, adf.test(eqm_np$residuals)$p.value)
 
   }
   
@@ -657,7 +665,7 @@ error_eqm_ar1r <- eqm_ar1r_f_avg - inflation_cpi_test
 dm.test(error_var_1, error_eqm_ar1r)
 
 
-# # intra period forecasts
+# intra period forecasts
 color = c("orange", "blue", "violetred2", "green", "black")
 plot.zoo(cbind(eqm_u_f, eqm_ar1_f, eqm_ar1r_f, eqm_np_f,
                inflation_cpi_full_d[date_d_test]),
@@ -671,8 +679,14 @@ title("intra-month forecasts")
 
 
 
-aux_eqm_ar1_rmse <- xts(aux_eqm_ar1_rmse, order.by = date_d_test)
-aux_var_1_rmse <- xts(rep(accuracy_var_1[1],(n_test-step+1)*28), order.by = date_d_test)
-plot.zoo(cbind(aux_var_1_rmse, aux_eqm_ar1_rmse), main=paste(step,"step ahead", sep = "-"), plot.type = "single",
-         col =c("dodgerblue", "violetred2"), ylab = "", xlab = "", cex.lab=2,  cex.axis=2)
 
+par(mfrow=c(1,3))
+
+plot.zoo(cbind(aux_var_1_rmse_1, aux_eqm_ar1_rmse_1), main="1-step ahead", plot.type = "single",
+         col =c("dodgerblue", "violetred2"), ylab = "", xlab = "",  cex.axis=1.5, cex.main=1.5)
+
+plot.zoo(cbind(aux_var_1_rmse_2, aux_eqm_ar1_rmse_2), main="2-step ahead", plot.type = "single",
+         col =c("dodgerblue", "violetred2"), ylab = "", xlab = "",  cex.axis=1.5, cex.main=1.5)
+
+plot.zoo(cbind(aux_var_1_rmse_3, aux_eqm_ar1_rmse_3), main="3-step ahead", plot.type = "single",
+         col =c("dodgerblue", "violetred2"), ylab = "", xlab = "",  cex.axis=1.5, cex.main=1.5)
