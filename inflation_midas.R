@@ -124,6 +124,16 @@ inflation_ps_agg_full <- matrix(inflation_ps_full, nrow=28) %>% colMeans(na.rm=T
 
 date_d <- time(inflation_ps_full) %>% as.Date
 
+
+aux <- xts(date_d, order.by = date_d)
+inflation_cpi_full_d <-merge(inflation_cpi_full, aux, all = TRUE)$inflation_cpi_full
+inflation_cpi_full_d <- na_locf(inflation_cpi_full_d)
+aux <-xts(time(inflation_ps_full), order.by = time(inflation_ps_full))
+inflation_cpi_full_d <-merge(aux, inflation_cpi_full_d, all = FALSE)$inflation_cpi_full
+
+
+
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #---------- SOME PLOTS -----------
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -137,16 +147,30 @@ plot.zoo(trends_xts,
          lwd = 1)
 
 
-# cpi vs PS
-par(mfrow=c(1,2))
-aux <- cbind(inflation_ps_agg_full, inflation_cpi_full)
-p1 <- ggplot(aux, aes(x=inflation_ps_agg_full, y=inflation_cpi_full)) + 
-      geom_point() +
-      geom_smooth(method=lm , color="red", se=FALSE) +
-      theme_ipsum() + 
-      labs(x="PS Inflation", y="cpi Inflation") + 
-      scale_y_continuous(breaks = seq(1,10,1))
-p1
+# cpi vs PS - scatter
+par(mfrow=c(1,1))
+plot.default(coredata(inflation_ps_agg_full),coredata(inflation_cpi_full),
+             xlab = 'PS Inflation',
+             ylab = 'IPCA Inflation',
+             cex.lab=1)
+eq = lm(inflation_cpi_full ~ + inflation_ps_agg_full)
+abline(coef(eq), col='red')
+
+
+
+# cpi vs PS - plot
+par(mfrow=c(1,1))
+data <- cbind(inflation_ps_full, inflation_cpi_full_d)
+plot.zoo(data, 
+         plot.type = 'single',
+         xlab = "Period",
+         ylab = "Annual Inflation Rate (%)",
+         lwd = 1,
+         col=c(2,1),
+         cex.lab=1,
+         pch=)
+abline(v=index(inflation_ps_full)[1736], col='grey', lwd=1, lty=2)
+legend("topleft", c('PS Inflation', 'IPCA Inflation'), lty = 1, col=c(2,1), nc=2, cex = 1, bty = "n")
 
 
 
@@ -163,28 +187,25 @@ cor(na.omit(aux))
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #---------- PARAMETERS ----------
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-n_max <- nrow(inflation_cpi_full)
-
 n_test <- 20
-n_train <- n_max - n_test
+
 
 # removing the last 10 observations 
 # inflation_cpi_full <- inflation_cpi_full[1:72]
 # inflation_ps_full <- inflation_ps_full[1:2016]
 # market_m_annual_full <- market_m_annual_full[1:72]
 
-step <- 3
-l <- 6
+n_max <- nrow(inflation_cpi_full)
+n_train <- n_max - n_test
+
+step <- 1
+l <- 13
 inflation_cpi_test <- inflation_cpi_full[(n_max - n_test + step):n_max]
 
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-#---------- IN-SAMPLE ------------
 date_m_train <- date_m[1:(n_max - n_test)]
 date_m_test <- date_m[(n_max - n_test + 1):(n_max)]
 date_d_train <- date_d[1:(n_max*28 - n_test*28)]
 date_d_test <-date_d[((n_max*28 - n_test*28) + 1):(n_max*28 - (step - 1)*28)]
-
 
 
 data_train <- list(y = as.numeric(inflation_cpi_full[date_m_train]),
@@ -194,8 +215,8 @@ data_train <- list(y = as.numeric(inflation_cpi_full[date_m_train]),
                    trend = seq(1:nrow(inflation_cpi_full[date_m_train])))
 
 
-
-
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#---------- IN-SAMPLE ------------
 
 #-------------- ARIMA ---
 arima <- Arima(data_train$y, c(1, 1, 0), include.constant = TRUE)
@@ -243,17 +264,20 @@ durbinWatsonTest(eq_exo)
 grangertest(y ~ x_agg, order = 1,  data = data_train)
 grangertest(x_agg ~ y, order = 1,  data = data_train)
 
-eqb_1 <- lm(y ~ -1 + mls(y, 1, 1) + 
-              mls(z, 1:2, 1) + 
-              mls(x_agg, 0, 1) + 
-              mls(x_agg, 3, 1),
+eqb_1 <- lm(y ~ trend + mls(y, 1, 1) + 
+              mls(z, 1, 1) + 
+              mls(x_agg, 0, 1), 
             data = data_train)
 
+summary(eqb_1)
 aux_eqb_1_f <- fitted(eqb_1)
 
 checkresiduals(eqb_1)
 adf.test(residuals(eqb_1))
-accuracy_eqb_1_in <- rmse(inflation_cpi_full[4:n_train], aux_eqb_1_f)
+accuracy_eqb_1_in <- rmse(inflation_cpi_full[2:n_train], aux_eqb_1_f)
+
+# testing long-term relationships 
+linearHypothesis(eqb_1, c("mls(y, 1, 1)=1", "mls(z, 1, 1)=0", "mls(x_agg, 0, 1)=0"))
 
 
 #-------- MIDAS-DL ---
@@ -263,11 +287,15 @@ eqm_u <- midas_r(y ~ trend +
                    mls(x, 0:l, 28),
                  data = data_train, start = NULL)
 
+summary(eqm_u)
 aux_eqm_u_f <- fitted(eqm_u)
 
 checkresiduals(eqm_u)
 adf.test(residuals(eqm_u)) 
 accuracy_eqm_u_in <- rmse(inflation_cpi_full[2:n_train], aux_eqm_u_f)
+
+linearHypothesis(eqm_u, c("z=0", "x1 + x2 + x3 + x4 + x5 + x6 + x7 = 0"))
+
 
 
 #-------- MIDAS-AR(1) ---
@@ -278,11 +306,14 @@ eqm_ar1 <- midas_r(y ~ trend +
                      mls(x, 0:l, 28),
                    data = data_train, start = NULL)
 
+summary(eqm_ar1)
 aux_eqm_ar1_f <- fitted(eqm_ar1)
 
 checkresiduals(eqm_ar1)
 adf.test(residuals(eqm_ar1))
 accuracy_eqm_ar1_in <- rmse(inflation_cpi_full[2:n_train], aux_eqm_ar1_f)
+
+linearHypothesis(eqm_ar1, c("y=1", "z=0", "x1 + x2 + x3 + x4 + x5 + x6 + x7 = 0"))
 
 
 
@@ -294,11 +325,15 @@ eqm_ar1r <- midas_r(y ~ trend +
                       mls(x, 0:l, 28, nealmon),
                     data = data_train, start = list(x = c(-0.1,0.1)))
 
+summary(eqm_ar1r)
 aux_eqm_ar1r_f <- fitted(eqm_ar1r)
 
 checkresiduals(eqm_ar1r)
 adf.test(residuals(eqm_ar1r)) 
 accuracy_eqm_ar1r_in <- cbind(rmse(inflation_cpi_full[2:n_train], aux_eqm_ar1r_f))
+
+linearHypothesis(eqm_ar1r, c("y=1", "z=0", "x1 + x2 = 0"))
+
 
 
 #-------- MIDAS-DL non-parametric---
@@ -307,11 +342,16 @@ eqm_np <- midas_r_np(y ~ trend +
                        mls(x, 0:l, 28),
                      data = data_train, lambda = NULL)
 
+summary(eqm_np)
 aux_eqm_np_f <- fitted(eqm_np)
 
 checkresiduals(eqm_np)
 adf.test(residuals(eqm_np)) 
 accuracy_eqm_np_in <- cbind(rmse(inflation_cpi_full[1:n_train], aux_eqm_np_f))
+
+
+coefs = eqm_np$coefficients
+r = sum(coefs[3:(3+l)])/(l*sd(data_train$x)/length(data_train$x))
 
 
 ####
@@ -339,7 +379,8 @@ arima_f <- c()
 var_1_f <- c()
 eqb_1_f <- c()
 
-aux_eqm_var_1_rmse <- c()
+aux_var_1_rmse <- c()
+resids_pvalues_var_1 <- c()
 
 options(warn = -1)
 
@@ -397,6 +438,14 @@ for (h in 0:(n_test - step)) {
     aux_var_f <- predict(var_1, n.ahead = step)$fcst$y[step, 1]
     var_1_f <- rbind(var_1_f, aux_var_f)
     
+    aux_var_1_rmse <- rbind(aux_var_1_rmse, rmse(inflation_cpi_full_d[(((n_max-n_test)+step-1)*28+1):((TT+step-1)*28+i)], var_1_f))
+    assign(paste("aux_var_1_rmse", step, sep = "_"), aux_var_1_rmse)
+    
+    residuals = xts(residuals(var_1), order.by=date_d_train[2:TT])$y
+    aux <- cbind(adf.test(residuals)$p.value, jarque.bera.test(residuals)$p.value, durbinWatsonTest(c(coredata(residuals))))
+    resids_pvalues_var_1 <- rbind(resids_pvalues_var_1, aux)
+    assign(paste("resids_pvalues_var_1", step, sep = "_"), resids_pvalues_var_1)
+    
     #-------- BRIDGE EQUATION --------
     eqb_1 <- midas_r(y ~ -1 + 
                        mls(y, step, 1) +
@@ -412,7 +461,10 @@ for (h in 0:(n_test - step)) {
   }
 }
 
-assign(paste("aux_var_1_rmse", step, sep = "_"),xts(rep(accuracy_var_1[1],(n_test-step+1)*28), order.by = date_d_test))
+iaux_var_1_rmse_1 = xts(aux_var_1_rmse_1, order.by = date_d_test)
+aux_var_1_rmse_2 = xts(aux_var_1_rmse_2, order.by = date_d_test)
+aux_var_1_rmse_3 = xts(aux_var_1_rmse_3, order.by = date_d_test)
+
 
 options(warn = 1)
 
@@ -471,8 +523,8 @@ aux_eqm_ar1_rmse <- c()
 aux_eqm_ar1r_rmse <- c()
 aux_eqm_np_rmse <- c()
 
-adf_resids_ar1 <- c()
-adf_resids_ar1r <- c()
+resids_pvalues_ar1 <- c()
+resids_pvalues_ar1r <-c()
 
 options(warn = -1)
 
@@ -519,6 +571,10 @@ for (h in 0:(n_test - step)) {
     aux_eqm_u_f <- forecast(eqm_u, newdata = data_test)$mean[step]
     eqm_u_f <- rbind(eqm_u_f, aux_eqm_u_f)
     
+    aux_eqm_u_rmse <- rbind(aux_eqm_u_rmse, rmse(inflation_cpi_full_d[(((n_max-n_test)+step-1)*28+1):((TT+step-1)*28+i)], eqm_u_f))
+    assign(paste("aux_eqm_u_rmse", step, sep = "_"), aux_eqm_ar1_rmse)
+    
+    
     
     #-------- MIDAS-AR(1) --------
     
@@ -534,8 +590,10 @@ for (h in 0:(n_test - step)) {
     
     aux_eqm_ar1_rmse <- rbind(aux_eqm_ar1_rmse, rmse(inflation_cpi_full_d[(((n_max-n_test)+step-1)*28+1):((TT+step-1)*28+i)], eqm_ar1_f))
     assign(paste("aux_eqm_ar1_rmse", step, sep = "_"), aux_eqm_ar1_rmse)
-    adf_resids_ar1 <- rbind(adf_resids_ar1, adf.test(eqm_ar1$residuals)$p.value)
-
+    
+    aux <- cbind(adf.test(eqm_ar1$residuals)$p.value, jarque.bera.test(eqm_ar1$residuals)$p.value, durbinWatsonTest(eqm_ar1$residuals))
+    resids_pvalues_ar1 <- rbind(resids_pvalues_ar1, aux)
+    assign(paste("resids_pvalues_ar1", step, sep = "_"), resids_pvalues_ar1)
     
     #-------- MIDAS-AR(1)-R --------
     
@@ -551,9 +609,12 @@ for (h in 0:(n_test - step)) {
     aux_eqm_ar1r_f <- forecast(eqm_ar1r, newdata = data_test)$mean[step]
     eqm_ar1r_f <- rbind(eqm_ar1r_f, aux_eqm_ar1r_f)
     
-    aux_eqm_ar1r_rmse <- rbind(aux_eqm_ar1r_rmse, rmse(inflation_cpi_full_d[(((n_max-n_test)+step-1)*28+1):((TT+step-1)*28+i)], eqm_ar1_f))
+    aux_eqm_ar1r_rmse <- rbind(aux_eqm_ar1r_rmse, rmse(inflation_cpi_full_d[(((n_max-n_test)+step-1)*28+1):((TT+step-1)*28+i)], eqm_ar1r_f))
     assign(paste("aux_eqm_ar1r_rmse", step, sep = "_"), aux_eqm_ar1r_rmse)
-    adf_resids_ar1r <- rbind(adf_resids_ar1r, adf.test(eqm_ar1r$residuals)$p.value)
+
+    aux <- cbind(adf.test(eqm_ar1r$residuals)$p.value, jarque.bera.test(eqm_ar1r$residuals)$p.value, durbinWatsonTest(eqm_ar1r$residuals))
+    resids_pvalues_ar1r <- rbind(resids_pvalues_ar1r, aux)
+    assign(paste("resids_pvalues_ar1r", step, sep = "_"), resids_pvalues_ar1r)
     
     
     #-------- MIDAS-DL non-parametric--------
@@ -566,22 +627,23 @@ for (h in 0:(n_test - step)) {
     aux_eqm_np_f <- forecast(eqm_np, newdata = data_test)$mean[step]
     eqm_np_f <- rbind(eqm_np_f, aux_eqm_np_f)
     
-    aux_eqm_np_rmse <- rbind(aux_eqm_np_rmse, rmse(inflation_cpi_full_d[(( n_max- n_test) * 28 + 1):(TT * 28 + i)], eqm_np_f))
+    aux_eqm_np_rmse <- rbind(aux_eqm_np_rmse, rmse(inflation_cpi_full_d[(((n_max-n_test)+step-1)*28+1):((TT+step-1)*28+i)], aux_eqm_np_f))
+    assign(paste("aux_eqm_np_rmse", step, sep = "_"), aux_eqm_ar1r_rmse)
 
+    
   }
-  
-
-  
-  # plot(eqm_ar1$residuals, type="l", xlab = "", ylab = "", main = "")
-  
-  # hist <- hist(eqm_ar1r$residuals, xlab = "", ylab = "", main ="", ylim= c(0,25))
-  # xfit<-seq(min(eqm_ar1r$residuals),max(eqm_ar1r$residuals),length=40)
-  # yfit<- dnorm(xfit,mean=mean(eqm_ar1r$residuals),sd=sd(eqm_ar1r$residuals))
-  # yfit <- yfit*diff(hist$mids[1:2])*length(eqm_ar1r$residuals)
-  # lines(xfit, yfit, col="red", lwd=2)
-  
-  # acf(eqm_ar1r$residuals, main = "", xlab = "", ylab = "")
 }
+
+
+aux_eqm_ar1_rmse_1 = xts(aux_eqm_ar1_rmse_1, order.by = date_d_test)
+aux_eqm_ar1r_rmse_1 = xts(aux_eqm_ar1r_rmse_1, order.by = date_d_test)
+
+aux_eqm_ar1_rmse_2 = xts(aux_eqm_ar1_rmse_2, order.by = date_d_test)
+aux_eqm_ar1r_rmse_2 = xts(aux_eqm_ar1r_rmse_2, order.by = date_d_test)
+
+aux_eqm_ar1_rmse_3 = xts(aux_eqm_ar1_rmse_3, order.by = date_d_test)
+aux_eqm_ar1r_rmse_3 = xts(aux_eqm_ar1r_rmse_3, order.by = date_d_test)
+
 
 
 options(warn = 1)
@@ -648,13 +710,33 @@ eqm_ar1r_f <- xts(eqm_ar1r_f, order.by = date_d_test)
 eqm_np_f <- xts(eqm_np_f, order.by = date_d_test)
 
 
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#--------- PLOT RMSFE ------------
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+par(mfrow=c(1,3))
+
+data = cbind(aux_var_1_rmse_1, aux_eqm_ar1_rmse_1, aux_eqm_ar1r_rmse_1)
+plot.zoo(data, plot.type = 'single', col = c(1,2,4), lwd=1, xlab='Period', ylab='RSMFE')
+legend('bottomright', c('VAR (1)', 'MIDAS-ADL (l=6)', 'MIDAS-ADLr (l=6)'), lty = 1, col=c(1,2,4), nc=1, cex = 1, bty = "n")
+title('h=1')
+
+data = cbind(aux_var_1_rmse_2, aux_eqm_ar1_rmse_2, aux_eqm_ar1r_rmse_2)
+plot.zoo(data, plot.type = 'single', col = c(1,2,4), lwd=1, xlab='Period', ylab='RSMFE')
+legend('bottomright', c('VAR (1)', 'MIDAS-ADL (l=6)', 'MIDAS-ADLr (l=6)'), lty = 1, col=c(1,2,4), nc=1, cex = 1, bty = "n")
+title('h=2')
+
+data = cbind(aux_var_1_rmse_3, aux_eqm_ar1_rmse_3, aux_eqm_ar1r_rmse_3)
+plot.zoo(data, plot.type = 'single', col = c(1,2,4), lwd=1, xlab='Period', ylab='RSMFE')
+legend('bottomright', c('VAR (1)', 'MIDAS-ADL (l=6)', 'MIDAS-ADLr (l=6)'), lty = 1, col=c(1,2,4), nc=1, cex = 1, bty = "n")
+title('h=3')
+
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #------- COMPARING MODELS --------
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # MODEL CONFIDENCE SET
-MCSprocedure(cbind(loss_arima, loss_var_1, loss_eqb_1, loss_eqm_ar1, loss_eqm_ar1r, loss_eqm_np))
+MCSprocedure(cbind(loss_arima, loss_var_1, loss_eqb_1, loss_eqm_u, loss_eqm_ar1, loss_eqm_ar1r, loss_eqm_np), alpha = 0.95)
 
 # DIEBOLD E MARIANO
 error_eqb_1 <- eqb_1_f_avg - inflation_cpi_test
