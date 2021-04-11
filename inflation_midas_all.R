@@ -182,9 +182,9 @@ cor(na.omit(aux))
 
 n = length(inflation_ps_agg_full)
 n_test <- round(0.25*n)
-# n_test = 10
+# n_test = 30
 
-# removing the last 10 observations 
+# # removing the last 10 observations 
 # inflation_cpi_full <- inflation_cpi_full[1:72]
 # inflation_ps_full <- inflation_ps_full[1:2016]
 # market_m_annual_full <- market_m_annual_full[1:72]
@@ -232,6 +232,7 @@ VARselect(aux)
 
 aux_vec <- ts(cbind(na.omit(data_train$y), na.omit(data_train$x_agg)))
 vec <- ca.jo(aux_vec, spec = "transitory")
+summary(alrtest(vec, c(1,0), 1))
 summary(vec)
 
 var_1 <- VAR(aux, 1)
@@ -273,6 +274,24 @@ accuracy_eqb_1_in <- rmse(inflation_cpi_full[2:n_train], aux_eqb_1_f)
 linearHypothesis(eqb_1, c("mls(y, 1, 1)=1", "mls(z, 1, 1)=0", "mls(x_agg, 0, 1)=0"))
 
 
+#-------- DUPLA DIFERENÇA
+
+eqdd_1 <- lm(diff(y) ~ diff(mls(y, 1, 1)) + 
+              diff(mls(z, 1, 1)) + 
+              diff(mls(x_agg, 0, 1)), 
+            data = data_train)
+
+summary(eqdd_1)
+# aux_eqdd_1_f <- diffinv(fitted(eqdd_1), xi=data_train$y[1])
+aux_eqdd_1_f1 <- c(0,fitted(eqdd_1)) + data_train$y[1:(n_train-1)]
+
+checkresiduals(eqdd_1)
+adf.test(residuals(eqdd_1))
+accuracy_eqdd_1_in <- rmse(inflation_cpi_full[2:n_train], aux_eqdd_1_f1)
+
+# testing long-term relationships 
+linearHypothesis(eqdd_1, c("diff(mls(y, 1, 1))=1", "diff(mls(z, 1, 1))=0", "diff(mls(x_agg, 0, 1))=0"))
+#stargazer(eqdd_1)
 
 #-------- MIDAS-DL ---
 
@@ -362,16 +381,16 @@ rownames(accuracy_in) <- c("ARIMA(1,1,0)", "VAR(1)", "Bridge Equation",
                            "MIDAS-DLnp")
 
 assign(paste("accuracy_in", l, sep = "_"),
-       matrix(rbind(accuracy_arima_in, accuracy_var_1_in, accuracy_eqb_1_in,
-                    accuracy_eqm_u_in, accuracy_eqm_ar1_in, accuracy_eqm_ar1r_in, accuracy_eqm_np_in), ncol = 1, nrow = 7,
-              dimnames = list(c("ARIMA(1,1,0)", "VAR(1)", "Bridge Equation",
+       matrix(rbind(accuracy_arima_in, accuracy_var_1_in, accuracy_eqb_1_in,accuracy_eqdd_1_in,
+                    accuracy_eqm_u_in, accuracy_eqm_ar1_in, accuracy_eqm_ar1r_in, accuracy_eqm_np_in), ncol = 1, nrow = 8,
+              dimnames = list(c("ARIMA(1,1,0)", "VAR(1)", "Bridge Equation","Double Difference",
                                 "MIDAS-DL", "MIDAS-ADL", "MIDAS-ADLr",
                                 "MIDAS-DLnp"), c("RMSE"))
        )
 )
 
 
-stargazer(eqm_u, eqm_ar1, eqm_ar1, eqm_ar1)
+#stargazer(eqm_u, eqm_ar1, eqm_ar1, eqm_ar1)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #--- FORECASTING NAIVE MODELS ----
@@ -380,6 +399,7 @@ stargazer(eqm_u, eqm_ar1, eqm_ar1, eqm_ar1)
 arima_f <- c()
 var_1_f <- c()
 eqb_1_f <- c()
+eqdd_1_f <- c()
 
 aux_var_1_rmse <- c()
 resids_pvalues_var_1 <- c()
@@ -391,13 +411,23 @@ for (h in 0:(n_test - step)) {
     TT = n_max - n_test + h
     
     aux_4 <- inflation_ps_full[1:(TT * 28)] %>% coredata %>% cbind %>% matrix(nrow = 28) %>% colMeans(na.rm = TRUE)
+    aux_44 <- xts(aux_4, order.by = date_m[1:TT])
+    
     
     data_train <- list(
       y = as.numeric(inflation_cpi_full[1:TT]),
-      x = as.numeric(xts(aux_4, order.by = date_m[1:TT])),
+      x = as.numeric(aux_44),
       z = as.numeric(market_m_annual_full[1:TT]),
       trend = seq(1:TT)
     )
+    
+    data_train_diff <- list(
+      y = as.numeric(diff(inflation_cpi_full[1:TT])),
+      x = as.numeric(diff(aux_44)),
+      z = as.numeric(diff(market_m_annual_full[1:TT])),
+      trend = seq(1:TT)
+    )
+    
     
     
     aux_1 <- Arima(inflation_ps_full[1:(TT * 28 + i)], order = c(1, 1, 0))
@@ -409,11 +439,21 @@ for (h in 0:(n_test - step)) {
     }
     
     aux_3 <- rbind(inflation_ps_full[(TT * 28 + 1):(TT * 28 + i)], aux_2)
+    aux_3_diff <- diff(aux_3)
     aux_4 <- aux_3 %>% coredata %>% cbind %>% matrix(nrow = 28) %>% colMeans(na.rm = TRUE)
+    aux_4_diff <- aux_3_diff %>% coredata %>% cbind %>% matrix(nrow = 28) %>% colMeans(na.rm = TRUE)
+    
     
     data_test <- list(
       y = as.numeric(rep(NA, step)),
       x = as.numeric(aux_4),
+      z = as.numeric(rep(NA, step)),
+      trend = seq(1:step)
+    )
+    
+    data_test_diff <- list(
+      y = as.numeric(rep(NA, step)),
+      x = as.numeric(aux_4_diff),
       z = as.numeric(rep(NA, step)),
       trend = seq(1:step)
     )
@@ -426,7 +466,7 @@ for (h in 0:(n_test - step)) {
     
     
     #-------------- VAR(1) --------------
-    
+  
     aux <- cbind(
       na.omit(data_train$y),
       na.omit(data_train$x),
@@ -434,6 +474,7 @@ for (h in 0:(n_test - step)) {
       na.omit(data_train$trend)
     )
     colnames(aux) <- c("y", "x", "z", "trend")
+
     
     
     var_1 <- VAR(aux, p = 1)
@@ -449,10 +490,10 @@ for (h in 0:(n_test - step)) {
     assign(paste("resids_pvalues_var_1", step, sep = "_"), resids_pvalues_var_1)
     
     #-------- BRIDGE EQUATION --------
-    eqb_1 <- midas_r(y ~ -1 + 
+    eqb_1 <- midas_r(y ~ trend + 
                        mls(y, step, 1) +
-                       mls(z, step:(step+1), 1) +
-                       mls(x, c(0,3), 1),
+                       mls(z, step, 1) +
+                       mls(x, step-1, 1),
                      data = data_train,
                      start = NULL
     )
@@ -460,10 +501,25 @@ for (h in 0:(n_test - step)) {
     
     aux_eqb_1_f <- forecast(eqb_1, newdata = data_test)$mean[step]
     eqb_1_f <- rbind(eqb_1_f, aux_eqb_1_f)
+    
+    
+    #--------- DOUBLE DIFFERENCE --------
+    eqdd_1 <- midas_r(y ~  
+                   mls(y, step, 1) +
+                   mls(z, step:(step+1), 1) +
+                   mls(x, step-1, 1),
+                 data = data_train_diff,
+                 start = NULL
+    )
+    
+    aux_eqdd_1_f <- forecast(eqdd_1, newdata=data_test_diff)$mean
+    aux_eqdd_1_f1 <- sum(aux_eqdd_1_f) + data_train$y[TT]
+    eqdd_1_f <- rbind(eqdd_1_f, aux_eqdd_1_f1)
+  
   }
 }
 
-iaux_var_1_rmse_1 = xts(aux_var_1_rmse_1, order.by = date_d_test)
+aux_var_1_rmse_1 = xts(aux_var_1_rmse_1, order.by = date_d_test)
 aux_var_1_rmse_2 = xts(aux_var_1_rmse_2, order.by = date_d_test)
 aux_var_1_rmse_3 = xts(aux_var_1_rmse_3, order.by = date_d_test)
 
@@ -475,11 +531,11 @@ options(warn = 1)
 arima_f_avg <- colMeans(matrix(arima_f, 28), na.rm = TRUE)
 var_1_f_avg <- colMeans(matrix(var_1_f, 28), na.rm = TRUE)
 eqb_1_f_avg <- colMeans(matrix(eqb_1_f, 28), na.rm = TRUE)
-
-
+# eqdd_1_f_avg = diffinv(colMeans(matrix(eqdd_1_f, 28), na.rm = TRUE), xi=data_train$y[n-n_test])[-1]
+eqdd_1_f_avg <- colMeans(matrix(eqdd_1_f, 28), na.rm = TRUE)
 
 accuracy_arima <- c(rmse(inflation_cpi_test, arima_f_avg))
-loss_arima <- LossLevel( inflation_cpi_test, arima_f_avg)
+loss_arima <- LossLevel(inflation_cpi_test, arima_f_avg)
 
 accuracy_var_1 <- c(rmse(inflation_cpi_test, var_1_f_avg))
 loss_var_1 <- LossLevel(inflation_cpi_test, var_1_f_avg)
@@ -487,10 +543,13 @@ loss_var_1 <- LossLevel(inflation_cpi_test, var_1_f_avg)
 accuracy_eqb_1 <- c(rmse(inflation_cpi_test, eqb_1_f_avg))
 loss_eqb_1 <- LossLevel(inflation_cpi_test, eqb_1_f_avg)
 
+accuracy_eqdd_1 <- c(rmse(inflation_cpi_test, eqdd_1_f_avg))
+loss_eqdd_1 <- LossLevel(inflation_cpi_test, eqdd_1_f_avg)
 
-assign(paste("accuracy_naive", l, sep = "_"),
-       matrix(rbind(accuracy_arima, accuracy_var_1, accuracy_eqb_1), ncol = 1, nrow = 3,
-              dimnames = list(c("ARIMA", "VAR(1)", "Bridge Equation"), c("RMSFE"))
+
+assign(paste("accuracy_naive", paste(step,l, sep="l"), sep = "_"),
+       matrix(rbind(accuracy_arima, accuracy_var_1, accuracy_eqb_1, accuracy_eqdd_1), ncol = 1, nrow = 4,
+              dimnames = list(c("ARIMA", "VAR(1)", "Bridge Equation", "Double Difference"), c("RMSFE"))
        )
 )
 
@@ -505,7 +564,7 @@ accuracy_arima <- rmse(inflation_cpi_test, arima_f_last)
 accuracy_var_1 <-rmse(inflation_cpi_test, var_1_f_last)
 accuracy_eqb_1 <- rmse(inflation_cpi_test, eqb_1_f_last)
 
-assign(paste("accuracy_naive_point", l, sep = "_"), 
+assign(paste("accuracy_naive_point", step, sep = "_"), 
        matrix(rbind(accuracy_arima, accuracy_var_1, accuracy_eqb_1), ncol = 1, nrow = 3,
               dimnames = list(c("ARIMA", "VAR(1)", "Bridge Equation"), c("RMSFE"))
        )
@@ -754,10 +813,13 @@ colnames(aux) <- cbind('loss_arima', 'loss_var_1', 'loss_eqb_1', 'loss_eqm_u_6',
 MCSprocedure(aux)
 
 # DIEBOLD E MARIANO
-error_eqb_1 <- eqb_1_f_avg - inflation_cpi_test
+error_arima <- arima_f_avg - inflation_cpi_test
 error_var_1 <- var_1_f_avg - inflation_cpi_test
+error_eqb_1 <- eqb_1_f_avg - inflation_cpi_test
+error_eqm_u <- eqm_u_f_avg - inflation_cpi_test
 error_eqm_ar1 <- eqm_ar1_f_avg - inflation_cpi_test
 error_eqm_ar1r <- eqm_ar1r_f_avg - inflation_cpi_test
+error_eqm_np <- eqm_np_f_avg - inflation_cpi_test
 
 dm.test(error_var_1, error_eqm_ar1r)
 
@@ -787,3 +849,181 @@ plot.zoo(cbind(aux_var_1_rmse_2, aux_eqm_ar1_rmse_2), main="2-step ahead", plot.
 
 plot.zoo(cbind(aux_var_1_rmse_3, aux_eqm_ar1_rmse_3), main="3-step ahead", plot.type = "single",
          col =c("dodgerblue", "violetred2"), ylab = "", xlab = "",  cex.axis=1.5, cex.main=1.5)
+
+
+
+# ERICSSON AND MARTINEZ
+
+# unrestricted regression
+eq_em_u <- lm(inflation_cpi_test ~
+                arima_f_avg + 
+                var_1_f_avg +
+                eqb_1_f_avg +
+                eqm_u_f_avg +
+                eqm_ar1_f_avg +
+                eqm_ar1r_f_avg +
+                eqm_np_f_avg
+                )
+
+linearHypothesis(eq_em_u, c("arima_f_avg=1", "var_1_f_avg=0", "eqb_1_f_avg=0",
+                            "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
+
+linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=1", "eqb_1_f_avg=0",
+                            "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
+
+linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=1",
+                            "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
+
+linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
+                            "eqm_u_f_avg=1", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
+
+linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
+                            "eqm_u_f_avg=0", "eqm_ar1_f_avg=1", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
+
+linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
+                            "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=1", "eqm_np_f_avg=0"))
+
+linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
+                            "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=1"))
+
+# residual diagnostic
+eq_em_arima <- lm(error_arima ~
+                    var_1_f_avg +
+                    eqb_1_f_avg +
+                    eqm_u_f_avg +
+                    eqm_ar1_f_avg +
+                    eqm_ar1r_f_avg +
+                    eqm_np_f_avg)
+
+summary(eq_em_arima)
+
+eq_em_var <- lm(error_var_1 ~
+                    arima_f_avg +
+                    eqb_1_f_avg +
+                    eqm_u_f_avg +
+                    eqm_ar1_f_avg +
+                    eqm_ar1r_f_avg +
+                    eqm_np_f_avg)
+summary(eq_em_var)
+
+eq_em_eqb <- lm(error_eqb_1 ~
+                  arima_f_avg + 
+                  var_1_f_avg +
+                  eqm_u_f_avg +
+                  eqm_ar1_f_avg +
+                  eqm_ar1r_f_avg +
+                  eqm_np_f_avg)
+summary(eq_em_eqb)
+
+
+eq_em_eqm_u <- lm(error_eqm_u ~
+                arima_f_avg + 
+                var_1_f_avg +
+                eqb_1_f_avg +
+                eqm_ar1_f_avg +
+                eqm_ar1r_f_avg +
+                eqm_np_f_avg)
+summary(eq_em_eqm_u)
+
+eq_em_ar1 <- lm(error_eqm_ar1 ~
+                arima_f_avg + 
+                var_1_f_avg +
+                eqb_1_f_avg +
+                eqm_u_f_avg +
+                eqm_ar1r_f_avg +
+                eqm_np_f_avg)
+summary(eq_em_ar1)
+
+eq_em_ar1r <- lm(error_eqm_ar1r ~
+                arima_f_avg + 
+                var_1_f_avg +
+                eqb_1_f_avg +
+                eqm_u_f_avg +
+                eqm_ar1_f_avg +
+                eqm_np_f_avg)
+summary(eq_em_ar1r)
+
+eq_em_np <- lm(error_eqm_np ~
+                arima_f_avg + 
+                var_1_f_avg +
+                eqb_1_f_avg +
+                eqm_u_f_avg +
+                eqm_ar1_f_avg +
+                eqm_ar1r_f_avg)
+summary(eq_em_np)
+
+
+# forecast differential
+data = cbind(arima_f_avg, var_1_f_avg, eqb_1_f_avg, eqm_u_f_avg, eqm_ar1_f_avg, eqm_ar1r_f_avg, eqm_np_f_avg)
+
+data_minus = data.frame(data - arima_f_avg)
+eq_em_arima <- lm(error_arima ~
+                    data_minus$var_1_f_avg +
+                    data_minus$eqb_1_f_avg +
+                    data_minus$eqm_u_f_avg +
+                    data_minus$eqm_ar1_f_avg +
+                    data_minus$eqm_ar1r_f_avg +
+                    data_minus$eqm_np_f_avg)
+
+summary(eq_em_arima)
+
+data_minus = data.frame(data - var_1_f_avg)
+eq_em_var <- lm(error_var_1 ~
+                  data_minus$arima_f_avg +
+                  data_minus$eqb_1_f_avg +
+                  data_minus$eqm_u_f_avg +
+                  data_minus$eqm_ar1_f_avg +
+                  data_minus$eqm_ar1r_f_avg +
+                  data_minus$eqm_np_f_avg)
+summary(eq_em_var)
+
+data_minus = data.frame(data - eqb_1_f_avg)
+eq_em_eqb <- lm(error_eqb_1 ~
+                  data_minus$arima_f_avg + 
+                  data_minus$var_1_f_avg +
+                  data_minus$eqm_u_f_avg +
+                  data_minus$eqm_ar1_f_avg +
+                  data_minus$eqm_ar1r_f_avg +
+                  data_minus$eqm_np_f_avg)
+summary(eq_em_eqb)
+
+data_minus = data.frame(data - eqm_u_f_avg)
+eq_em_eqm_u <- lm(error_eqm_u ~
+                    data_minus$arima_f_avg + 
+                    data_minus$var_1_f_avg +
+                    data_minus$eqb_1_f_avg +
+                    data_minus$eqm_ar1_f_avg +
+                    data_minus$eqm_ar1r_f_avg +
+                    data_minus$eqm_np_f_avg)
+summary(eq_em_eqm_u)
+
+data_minus = data.frame(data - eqm_ar1_f_avg)
+eq_em_ar1 <- lm(error_eqm_ar1 ~
+                  data_minus$arima_f_avg + 
+                  data_minus$var_1_f_avg +
+                  data_minus$eqb_1_f_avg +
+                  data_minus$eqm_u_f_avg +
+                  data_minus$eqm_ar1r_f_avg +
+                  data_minus$eqm_np_f_avg)
+summary(eq_em_ar1)
+
+data_minus = data.frame(data - eqm_ar1r_f_avg)
+eq_em_ar1r <- lm(error_eqm_ar1r ~
+                   data_minus$arima_f_avg + 
+                   data_minus$var_1_f_avg +
+                   data_minus$eqb_1_f_avg +
+                   data_minus$eqm_u_f_avg +
+                   data_minus$eqm_ar1_f_avg +
+                   data_minus$eqm_np_f_avg)
+summary(eq_em_ar1r)
+
+data_minus = data.frame(data - eqm_np_f_avg)
+eq_em_np <- lm(error_eqm_np ~
+                 data_minus$arima_f_avg + 
+                 data_minus$var_1_f_avg +
+                 data_minus$eqb_1_f_avg +
+                 data_minus$eqm_u_f_avg +
+                 data_minus$eqm_ar1_f_avg +
+                 data_minus$eqm_ar1r_f_avg)
+summary(eq_em_np)
+
