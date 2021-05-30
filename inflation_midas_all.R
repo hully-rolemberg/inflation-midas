@@ -143,8 +143,8 @@ par(mfrow=c(1,1))
 # cpi vs PS - scatter
 par(mfrow=c(1,1))
 plot.default(coredata(inflation_ps_agg_full),coredata(inflation_cpi_full),
-             xlab = 'PS Inflation',
-             ylab = 'IPCA Inflation',
+             xlab = 'PS Inflation (%)',
+             ylab = 'IPCA Inflation (%)',
              cex.lab=1)
 eq = lm(inflation_cpi_full ~ + inflation_ps_agg_full)
 abline(coef(eq), col='red')
@@ -160,10 +160,25 @@ plot.zoo(data,
          lwd = 1,
          col=c(2,1),
          cex.lab=1,
-         pch=)
-legend("top", c('PS Inflation', 'CPI Inflation'), lty = 1, col=c(2,1), nc=2, cex = 1, bty = "n")
+          )
+legend("top", c('PS Inflation', 'IPCA Inflation'), lty = 1, col=c(2,1), nc=2, cex = 1, bty = "n")
 
 
+
+# Define the plot
+inflation_ps_full_df = data_frame(inflation_ps_full)
+inflation_ps_full_df$date = time(inflation_ps_full)
+p <- inflation_ps_full_df %>% 
+  mutate(
+    year = factor(year(date)),     # use year to define separate curves
+    date = update(date, year = 1)  # use a constant year for the x-axis
+  ) %>% 
+  ggplot(aes(date, inflation_ps_full, color = year)) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b") +
+  scale_y_continuous(n.breaks = 10) +
+  labs(y='PS Inflation (%)',x='Period')
+# Raw daily data
+p + geom_line(lwd=0.4)
 
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -182,13 +197,14 @@ cor(na.omit(aux))
 
 n = length(inflation_ps_agg_full)
 n_test <- round(0.25*n)
+# n_test = 10
 # n_test = 30
 
-# # removing the last 10 observations 
+# removing the last 10 observations
 # inflation_cpi_full <- inflation_cpi_full[1:72]
 # inflation_ps_full <- inflation_ps_full[1:2016]
 # market_m_annual_full <- market_m_annual_full[1:72]
-
+#  
 
 n_max <- nrow(inflation_cpi_full)
 n_train <- n_max - n_test
@@ -210,6 +226,16 @@ data_train <- list(y = as.numeric(inflation_cpi_full[date_m_train]),
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #---------- IN-SAMPLE ------------
+
+#--------------AR(1) ---
+ar1 <- Arima(data_train$y, c(1, 0, 0), include.constant = TRUE)
+summary(ar1)
+aux_ar1_f <- fitted(ar1)
+
+checkresiduals(ar1)
+adf.test(residuals(ar1))
+accuracy_ar1_in <- rmse(ts(inflation_cpi_full[1:n_train]), aux_ar1_f)
+
 
 #-------------- ARIMA ---
 arima <- Arima(data_train$y, c(1, 1, 0), include.constant = TRUE)
@@ -367,7 +393,8 @@ r = sum(coefs[3:(3+l)])/(l*sd(data_train$x)/length(data_train$x))
 r
 
 ####
-accuracy_in <- rbind(accuracy_arima_in,
+accuracy_in <- rbind(accuracy_ar1_in,
+                     accuracy_arima_in,
                      accuracy_var_1_in,
                      accuracy_eqb_1_in,
                      accuracy_eqm_u_in,
@@ -376,14 +403,14 @@ accuracy_in <- rbind(accuracy_arima_in,
                      accuracy_eqm_np_in)
 
 colnames(accuracy_in) <- c("RMSE")
-rownames(accuracy_in) <- c("ARIMA(1,1,0)", "VAR(1)", "Bridge Equation",
+rownames(accuracy_in) <- c("AR(1)", "ARIMA(1,1,0)", "VAR(1)", "Bridge Equation",
                            "MIDAS-DL", "MIDAS-ADL", "MIDAS-ADLr",
                            "MIDAS-DLnp")
 
 assign(paste("accuracy_in", l, sep = "_"),
-       matrix(rbind(accuracy_arima_in, accuracy_var_1_in, accuracy_eqb_1_in,accuracy_eqdd_1_in,
-                    accuracy_eqm_u_in, accuracy_eqm_ar1_in, accuracy_eqm_ar1r_in, accuracy_eqm_np_in), ncol = 1, nrow = 8,
-              dimnames = list(c("ARIMA(1,1,0)", "VAR(1)", "Bridge Equation","Double Difference",
+       matrix(rbind(accuracy_ar1_in, accuracy_arima_in, accuracy_var_1_in, accuracy_eqb_1_in,accuracy_eqdd_1_in,
+                    accuracy_eqm_u_in, accuracy_eqm_ar1_in, accuracy_eqm_ar1r_in, accuracy_eqm_np_in), ncol = 1, nrow = 9,
+              dimnames = list(c("AR(1)", "ARIMA(1,1,0)", "VAR(1)", "Bridge Equation","Double Difference",
                                 "MIDAS-DL", "MIDAS-ADL", "MIDAS-ADLr",
                                 "MIDAS-DLnp"), c("RMSE"))
        )
@@ -396,6 +423,7 @@ assign(paste("accuracy_in", l, sep = "_"),
 #--- FORECASTING NAIVE MODELS ----
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+ar1_f <- c()
 arima_f <- c()
 var_1_f <- c()
 eqb_1_f <- c()
@@ -457,6 +485,13 @@ for (h in 0:(n_test - step)) {
       z = as.numeric(rep(NA, step)),
       trend = seq(1:step)
     )
+
+    
+    #------------- ARIMA -------------
+    
+    ar1 <- Arima(data_train$y, c(1, 0, 0), include.constant = TRUE)
+    aux_ar1_f <- forecast(ar1, h = step)$mean[step]
+    ar1_f <- rbind(ar1_f, aux_ar1_f)
     
     #------------- ARIMA -------------
     
@@ -528,11 +563,15 @@ options(warn = 1)
 
 # AVERAGE FORECAST
 
+ar1_f_avg <- colMeans(matrix(ar1_f, 28), na.rm = TRUE)
 arima_f_avg <- colMeans(matrix(arima_f, 28), na.rm = TRUE)
 var_1_f_avg <- colMeans(matrix(var_1_f, 28), na.rm = TRUE)
 eqb_1_f_avg <- colMeans(matrix(eqb_1_f, 28), na.rm = TRUE)
 # eqdd_1_f_avg = diffinv(colMeans(matrix(eqdd_1_f, 28), na.rm = TRUE), xi=data_train$y[n-n_test])[-1]
 eqdd_1_f_avg <- colMeans(matrix(eqdd_1_f, 28), na.rm = TRUE)
+
+accuracy_ar1 <- c(rmse(inflation_cpi_test, ar1_f_avg))
+loss_ar1 <- LossLevel(inflation_cpi_test, ar1_f_avg)
 
 accuracy_arima <- c(rmse(inflation_cpi_test, arima_f_avg))
 loss_arima <- LossLevel(inflation_cpi_test, arima_f_avg)
@@ -548,25 +587,26 @@ loss_eqdd_1 <- LossLevel(inflation_cpi_test, eqdd_1_f_avg)
 
 
 assign(paste("accuracy_naive", paste(step,l, sep="l"), sep = "_"),
-       matrix(rbind(accuracy_arima, accuracy_var_1, accuracy_eqb_1, accuracy_eqdd_1), ncol = 1, nrow = 4,
-              dimnames = list(c("ARIMA", "VAR(1)", "Bridge Equation", "Double Difference"), c("RMSFE"))
+       matrix(rbind(accuracy_ar1, accuracy_arima, accuracy_var_1, accuracy_eqb_1, accuracy_eqdd_1), ncol = 1, nrow = 5,
+              dimnames = list(c("AR(1)","ARIMA", "VAR(1)", "Bridge Equation", "Double Difference"), c("RMSFE"))
        )
 )
 
 
 # MOST RECENT FORECAST
-
+ar1_f_last <- matrix(ar1_f, 28)[28, ]
 arima_f_last <- matrix(arima_f, 28)[28, ]
 var_1_f_last <- matrix(var_1_f, 28)[28, ]
 eqb_1_f_last <- matrix(eqb_1_f, 28)[28, ]
 
+accuracy_ar1 <- rmse(inflation_cpi_test, ar1_f_last)
 accuracy_arima <- rmse(inflation_cpi_test, arima_f_last)
 accuracy_var_1 <-rmse(inflation_cpi_test, var_1_f_last)
 accuracy_eqb_1 <- rmse(inflation_cpi_test, eqb_1_f_last)
 
 assign(paste("accuracy_naive_point", step, sep = "_"), 
-       matrix(rbind(accuracy_arima, accuracy_var_1, accuracy_eqb_1), ncol = 1, nrow = 3,
-              dimnames = list(c("ARIMA", "VAR(1)", "Bridge Equation"), c("RMSFE"))
+       matrix(rbind(accuracy_ar1, accuracy_arima, accuracy_var_1, accuracy_eqb_1), ncol = 1, nrow = 4,
+              dimnames = list(c("AR(1)", "ARIMA", "VAR(1)", "Bridge Equation"), c("RMSFE"))
        )
 )
 
@@ -804,15 +844,16 @@ title('h=3')
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # MODEL CONFIDENCE SET
-aux <- cbind(loss_arima, loss_var_1, loss_eqb_1, loss_eqm_u_6, loss_eqm_ar1_6, loss_eqm_ar1r_6, loss_eqm_np_6,
+aux <- cbind(loss_ar1, loss_arima, loss_var_1, loss_eqb_1, loss_eqm_u_6, loss_eqm_ar1_6, loss_eqm_ar1r_6, loss_eqm_np_6,
              loss_eqm_u_13, loss_eqm_ar1_13, loss_eqm_ar1r_13, loss_eqm_np_13,  loss_eqm_u_27, loss_eqm_ar1_27, 
              loss_eqm_ar1r_27, loss_eqm_np_27)
-colnames(aux) <- cbind('loss_arima', 'loss_var_1', 'loss_eqb_1', 'loss_eqm_u_6', 'loss_eqm_ar1_6', 'loss_eqm_ar1r_6', 'loss_eqm_np_6',
+colnames(aux) <- cbind('loss_ar1', 'loss_arima', 'loss_var_1', 'loss_eqb_1', 'loss_eqm_u_6', 'loss_eqm_ar1_6', 'loss_eqm_ar1r_6', 'loss_eqm_np_6',
                        'loss_eqm_u_13', 'loss_eqm_ar1_13', 'loss_eqm_ar1r_13', 'loss_eqm_np_13',  'loss_eqm_u_27', 'loss_eqm_ar1_27', 
                        'loss_eqm_ar1r_27', 'loss_eqm_np_27')
 MCSprocedure(aux)
 
 # DIEBOLD E MARIANO
+error_ar1 <- ar1_f_avg - inflation_cpi_test
 error_arima <- arima_f_avg - inflation_cpi_test
 error_var_1 <- var_1_f_avg - inflation_cpi_test
 error_eqb_1 <- eqb_1_f_avg - inflation_cpi_test
@@ -837,8 +878,6 @@ legend("topleft", inset=c(0,0), y.intersp = 1,
 title("intra-month forecasts")
 
 
-
-
 par(mfrow=c(1,3))
 
 plot.zoo(cbind(aux_var_1_rmse_1, aux_eqm_ar1_rmse_1), main="1-step ahead", plot.type = "single",
@@ -856,6 +895,7 @@ plot.zoo(cbind(aux_var_1_rmse_3, aux_eqm_ar1_rmse_3), main="3-step ahead", plot.
 
 # unrestricted regression
 eq_em_u <- lm(inflation_cpi_test ~
+                ar1_f_avg +
                 arima_f_avg + 
                 var_1_f_avg +
                 eqb_1_f_avg +
@@ -865,29 +905,44 @@ eq_em_u <- lm(inflation_cpi_test ~
                 eqm_np_f_avg
                 )
 
-linearHypothesis(eq_em_u, c("arima_f_avg=1", "var_1_f_avg=0", "eqb_1_f_avg=0",
+linearHypothesis(eq_em_u, c("ar1_f_avg=1", "arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
                             "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
 
-linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=1", "eqb_1_f_avg=0",
+linearHypothesis(eq_em_u, c("ar1_f_avg=0", "arima_f_avg=1", "var_1_f_avg=0", "eqb_1_f_avg=0",
                             "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
 
-linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=1",
+linearHypothesis(eq_em_u, c("ar1_f_avg=0", "arima_f_avg=0", "var_1_f_avg=1", "eqb_1_f_avg=0",
                             "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
 
-linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
+linearHypothesis(eq_em_u, c("ar1_f_avg=0", "arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=1",
+                            "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
+
+linearHypothesis(eq_em_u, c("ar1_f_avg=0", "arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
                             "eqm_u_f_avg=1", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
 
-linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
+linearHypothesis(eq_em_u, c("ar1_f_avg=0", "arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
                             "eqm_u_f_avg=0", "eqm_ar1_f_avg=1", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=0"))
 
-linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
+linearHypothesis(eq_em_u, c("ar1_f_avg=0", "arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
                             "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=1", "eqm_np_f_avg=0"))
 
-linearHypothesis(eq_em_u, c("arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
+linearHypothesis(eq_em_u, c("ar1_f_avg=0", "arima_f_avg=0", "var_1_f_avg=0", "eqb_1_f_avg=0",
                             "eqm_u_f_avg=0", "eqm_ar1_f_avg=0", "eqm_ar1r_f_avg=0", "eqm_np_f_avg=1"))
 
 # residual diagnostic
+eq_em_ar1 <- lm(error_ar1 ~
+                    arima_f_avg +
+                    var_1_f_avg +
+                    eqb_1_f_avg +
+                    eqm_u_f_avg +
+                    eqm_ar1_f_avg +
+                    eqm_ar1r_f_avg +
+                    eqm_np_f_avg)
+
+summary(eq_em_ar1)
+
 eq_em_arima <- lm(error_arima ~
+                    ar1_f_avg +
                     var_1_f_avg +
                     eqb_1_f_avg +
                     eqm_u_f_avg +
@@ -898,6 +953,7 @@ eq_em_arima <- lm(error_arima ~
 summary(eq_em_arima)
 
 eq_em_var <- lm(error_var_1 ~
+                    ar1_f_avg +
                     arima_f_avg +
                     eqb_1_f_avg +
                     eqm_u_f_avg +
@@ -907,6 +963,7 @@ eq_em_var <- lm(error_var_1 ~
 summary(eq_em_var)
 
 eq_em_eqb <- lm(error_eqb_1 ~
+                  ar1_f_avg +
                   arima_f_avg + 
                   var_1_f_avg +
                   eqm_u_f_avg +
@@ -917,47 +974,64 @@ summary(eq_em_eqb)
 
 
 eq_em_eqm_u <- lm(error_eqm_u ~
-                arima_f_avg + 
-                var_1_f_avg +
-                eqb_1_f_avg +
-                eqm_ar1_f_avg +
-                eqm_ar1r_f_avg +
-                eqm_np_f_avg)
+                  ar1_f_avg +
+                  arima_f_avg + 
+                  var_1_f_avg +
+                  eqb_1_f_avg +
+                  eqm_ar1_f_avg +
+                  eqm_ar1r_f_avg +
+                  eqm_np_f_avg)
 summary(eq_em_eqm_u)
 
-eq_em_ar1 <- lm(error_eqm_ar1 ~
-                arima_f_avg + 
-                var_1_f_avg +
-                eqb_1_f_avg +
-                eqm_u_f_avg +
-                eqm_ar1r_f_avg +
-                eqm_np_f_avg)
-summary(eq_em_ar1)
+eq_em_eqm_ar1 <- lm(error_eqm_ar1 ~
+                  ar1_f_avg +
+                  arima_f_avg + 
+                  var_1_f_avg +
+                  eqb_1_f_avg +
+                  eqm_u_f_avg +
+                  eqm_ar1r_f_avg +
+                  eqm_np_f_avg)
+summary(eq_em_eqm_ar1)
 
-eq_em_ar1r <- lm(error_eqm_ar1r ~
+eq_em_eqm_ar1r <- lm(error_eqm_ar1r ~
+                ar1_f_avg +
                 arima_f_avg + 
                 var_1_f_avg +
                 eqb_1_f_avg +
                 eqm_u_f_avg +
                 eqm_ar1_f_avg +
                 eqm_np_f_avg)
-summary(eq_em_ar1r)
+summary(eq_em_eqm_ar1r)
 
-eq_em_np <- lm(error_eqm_np ~
+eq_em_eqm_np <- lm(error_eqm_np ~
+                ar1_f_avg +
                 arima_f_avg + 
                 var_1_f_avg +
                 eqb_1_f_avg +
                 eqm_u_f_avg +
                 eqm_ar1_f_avg +
                 eqm_ar1r_f_avg)
-summary(eq_em_np)
+summary(eq_em_eqm_np)
 
 
 # forecast differential
-data = cbind(arima_f_avg, var_1_f_avg, eqb_1_f_avg, eqm_u_f_avg, eqm_ar1_f_avg, eqm_ar1r_f_avg, eqm_np_f_avg)
+data = cbind(ar1_f_avg, arima_f_avg, var_1_f_avg, eqb_1_f_avg, eqm_u_f_avg, eqm_ar1_f_avg, eqm_ar1r_f_avg, eqm_np_f_avg)
+
+data_minus = data.frame(data - ar1_f_avg)
+eq_em_ar1 <- lm(error_ar1 ~
+                    data_minus$arima_f_avg +
+                    data_minus$var_1_f_avg +
+                    data_minus$eqb_1_f_avg +
+                    data_minus$eqm_u_f_avg +
+                    data_minus$eqm_ar1_f_avg +
+                    data_minus$eqm_ar1r_f_avg +
+                    data_minus$eqm_np_f_avg)
+
+summary(eq_em_ar1)
 
 data_minus = data.frame(data - arima_f_avg)
 eq_em_arima <- lm(error_arima ~
+                    data_minus$ar1_f_avg +
                     data_minus$var_1_f_avg +
                     data_minus$eqb_1_f_avg +
                     data_minus$eqm_u_f_avg +
@@ -969,6 +1043,7 @@ summary(eq_em_arima)
 
 data_minus = data.frame(data - var_1_f_avg)
 eq_em_var <- lm(error_var_1 ~
+                  data_minus$ar1_f_avg +
                   data_minus$arima_f_avg +
                   data_minus$eqb_1_f_avg +
                   data_minus$eqm_u_f_avg +
@@ -979,6 +1054,7 @@ summary(eq_em_var)
 
 data_minus = data.frame(data - eqb_1_f_avg)
 eq_em_eqb <- lm(error_eqb_1 ~
+                  data_minus$ar1_f_avg +
                   data_minus$arima_f_avg + 
                   data_minus$var_1_f_avg +
                   data_minus$eqm_u_f_avg +
@@ -989,6 +1065,7 @@ summary(eq_em_eqb)
 
 data_minus = data.frame(data - eqm_u_f_avg)
 eq_em_eqm_u <- lm(error_eqm_u ~
+                    data_minus$ar1_f_avg +
                     data_minus$arima_f_avg + 
                     data_minus$var_1_f_avg +
                     data_minus$eqb_1_f_avg +
@@ -998,32 +1075,35 @@ eq_em_eqm_u <- lm(error_eqm_u ~
 summary(eq_em_eqm_u)
 
 data_minus = data.frame(data - eqm_ar1_f_avg)
-eq_em_ar1 <- lm(error_eqm_ar1 ~
+eq_em_eqm_ar1 <- lm(error_eqm_ar1 ~
                   data_minus$arima_f_avg + 
                   data_minus$var_1_f_avg +
                   data_minus$eqb_1_f_avg +
                   data_minus$eqm_u_f_avg +
                   data_minus$eqm_ar1r_f_avg +
                   data_minus$eqm_np_f_avg)
-summary(eq_em_ar1)
+summary(eq_em_eqm_ar1)
 
 data_minus = data.frame(data - eqm_ar1r_f_avg)
-eq_em_ar1r <- lm(error_eqm_ar1r ~
-                   data_minus$arima_f_avg + 
-                   data_minus$var_1_f_avg +
-                   data_minus$eqb_1_f_avg +
-                   data_minus$eqm_u_f_avg +
-                   data_minus$eqm_ar1_f_avg +
-                   data_minus$eqm_np_f_avg)
-summary(eq_em_ar1r)
+eq_em_eqm_ar1r <- lm(error_eqm_ar1r ~
+                         data_minus$ar1_f_avg +
+                         data_minus$arima_f_avg + 
+                         data_minus$var_1_f_avg +
+                         data_minus$eqb_1_f_avg +
+                         data_minus$eqm_u_f_avg +
+                         data_minus$eqm_ar1_f_avg +
+                         data_minus$eqm_np_f_avg)
+summary(eq_em_eqm_ar1r)
 
 data_minus = data.frame(data - eqm_np_f_avg)
-eq_em_np <- lm(error_eqm_np ~
-                 data_minus$arima_f_avg + 
-                 data_minus$var_1_f_avg +
-                 data_minus$eqb_1_f_avg +
-                 data_minus$eqm_u_f_avg +
-                 data_minus$eqm_ar1_f_avg +
-                 data_minus$eqm_ar1r_f_avg)
-summary(eq_em_np)
+eq_em_eqm_np <- lm(error_eqm_np ~
+                     data_minus$ar1_f_avg +
+                     data_minus$arima_f_avg + 
+                     data_minus$var_1_f_avg +
+                     data_minus$eqb_1_f_avg +
+                     data_minus$eqm_u_f_avg +
+                     data_minus$eqm_ar1_f_avg +
+                     data_minus$eqm_ar1r_f_avg)
+
+summary(eq_em_eqm_np)
 
